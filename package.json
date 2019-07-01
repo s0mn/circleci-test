@@ -1,0 +1,42 @@
+{
+  "name": "launcher-reactor",
+  "version": "1.8.1",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "NODE_ENV=test REDIS_ENV=test mocha --compilers js:@babel/register test/*.test.js --max-old-space-size=8192",
+    "test:integration": "clear && printf '\\e[3J'  && NODE_ENV=test REDIS_ENV=test AWS_XRAY_TRACING_NAME=atom-launcher mocha --compilers js:@babel/register test/integration/*.test.js --max-old-space-size=8192",
+    "example": "lambo build -m && AWS_XRAY_TRACING_NAME=atom-launcher NODE_ENV=test node test/example.js",
+    "example:server": "lambo build -m && AWS_XRAY_TRACING_NAME=atom-launcher NODE_ENV=test node local-server.js"
+  },
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "amazon-dax-client": "^1.2.0",
+    "atom-api-client": "^9.0.0",
+    "atom-serverless": "^1.0.13",
+    "atom-tool": "^2.3.5",
+    "aws-param-store": "^2.1.0",
+    "aws-sdk": "^2.383.0",
+    "aws-xray-sdk": "^2.2.0",
+    "axios": "^0.18.0",
+    "bluebird": "^3.5.3",
+    "ejs": "^2.6.1",
+    "hiredis": "^0.5.0",
+    "launchdarkly-node-server-sdk": "^5.8.2",
+    "lodash": "^4.17.11",
+    "pino": "^5.10.10",
+    "rope-client": "^3.16.1"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.2.2",
+    "@babel/plugin-proposal-class-properties": "^7.2.3",
+    "@babel/plugin-proposal-export-default-from": "^7.2.0",
+    "@babel/register": "^7.0.0",
+    "babel-preset-env": "^1.7.0",
+    "chai": "^4.2.0",
+    "express": "^4.17.1",
+    "mocha": "^5.2.0",
+    "rv-decree-client": "^2.3.1"
+  }
+}
