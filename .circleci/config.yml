@@ -43,12 +43,13 @@ jobs:
             - aws_config
   sync:
     <<: *container_config
+    steps:
+      - run: cat aws_config >> $BASH_ENV
     executor: aws-cli/default
     steps:
       - aws-cli/install
       - attach_workspace:
           at: .
-      - run: cat aws_config >> $BASH_ENV
       - run:
           name: Configure AWS CLI
           command: |
