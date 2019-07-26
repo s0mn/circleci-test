@@ -21,7 +21,7 @@ orbs:
 jobs:
   aws_config:
     <<: *container_config
-        executor: aws-cli/default
+    executor: aws-cli/default
     steps:
       - aws-cli/install
       - run:
