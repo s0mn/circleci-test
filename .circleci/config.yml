@@ -29,7 +29,7 @@ commands:
           name: Configure VARs
           command: |
             if [[ $CIRCLE_BRANCH != "development" && $CIRCLE_BRANCH != "master" && $CIRCLE_BRANCH != "test" && $CIRCLE_BRANCH != "uat" ]]; then KEYENV=DEVELOPMENT && BRANCH=development; elif [[ $CIRCLE_BRANCH == "master" ]]; then KEYENV=PRODUCTION && BRANCH=production; else KEYENV=$( echo $CIRCLE_BRANCH | tr "[:lower:]" "[:upper:]" ) && BRANCH=$CIRCLE_BRANCH; fi
-            if [[ $CIRCLE_BRANCH == "master" ]]; then CIRCLE_LD_KEY=$PROD_LD_SDK_KEY; else CIRCLE_LD_KEY=$TEST_LD_SDK_KEY; fi
+            if [[ $CIRCLE_BRANCH == "master" ]]; then export CIRCLE_LD_KEY=$PROD_LD_SDK_KEY; else export CIRCLE_LD_KEY=$TEST_LD_SDK_KEY; fi
             ACCESS_KEY="AWS_ACCESS_KEY_ID_$KEYENV"
             SECRET_KEY="AWS_SECRET_ACCESS_KEY_$KEYENV"
             aws configure set aws_access_key_id "${!ACCESS_KEY}" --profile default
