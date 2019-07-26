@@ -39,16 +39,29 @@ orbs:
 commands:
   configure_aws:
     description: "Configure AWS"
+    parameters:
+      env:
+        type: string
+        default: $CIRCLE_BRANCH
     steps:
       - run:
           name: Configure AWS CLI
           command: |
+            if [[ $CIRCLE_BRANCH != "development" && $CIRCLE_BRANCH != "production" && $CIRCLE_BRANCH != "test" && $CIRCLE_BRANCH != "qa" ]]; then
+              KEYENV=DEVELOPMENT
+              BRANCH=development
+            else
+              KEYENV=$( echo $CIRCLE_BRANCH | tr '[:lower:]' '[:upper:]' )
+              BRANCH=$CIRCLE_BRANCH
+            fi
             ACCESS_KEY="AWS_ACCESS_KEY_ID_$KEYENV"
             SECRET_KEY="AWS_SECRET_ACCESS_KEY_$KEYENV"
             echo "${!ACCESS_KEY}"
             aws configure set aws_access_key_id "${!ACCESS_KEY}" --profile default
             aws configure set aws_secret_access_key "${!SECRET_KEY}" --profile default
             aws configure set region us-east-1 --profile default
+            if [[ $CIRCLE_BRANCH != "production" ]]; then export CIRCLE_LD_KEY=$TEST_LD_SDK_KEY; else export CIRCLE_LD_KEY=$PROD_LD_SDK_KEY; fi
+
 
 jobs:
   set_vars:
@@ -95,63 +108,38 @@ jobs:
             aws configure set aws_secret_access_key "${!SECRET_KEY}" --profile default
             aws configure set region us-east-1 --profile default
             EOF
-            echo $BASH_ENV > ./test
-            cat ./test
-  lint:
+  lint-audit-test:
     <<: *container_config
     steps:
       - checkout
       - *restore_dep_cache
       - run:
-          name: Lint code
-          command: npm run lint
-  audit:
-    <<: *container_config
-    steps:
-      - checkout
-      - *restore_dep_cache
-      - run:
-          name: Create lockfile and run audit
+          name: Lint, audit, and test code
           command: |
+            npm run lint
             npm i --package-lock-only
             npm audit
-  test:
-    <<: *container_config
-    steps:
-      - checkout
-      - *restore_dep_cache
-      - run:
-          name: Unit tests
-          command: npm test
-          # command: |
-          #   npm install mocha-junit-reporter
-          #   mkdir reports
-          #   ./node_modules/.bin/nyc ./node_modules/.bin/mocha --recursive --timeout=10000 --exit --reporter mocha-junit-reporter --reporter-options mochaFile=reports/mocha/test-results.xml --require babel-core/register --require ignore-styles --require /home/circleci/node/node_modules/atom-test-harness/lib/setup.js test/*.test.js test/**/*.test.js
-          # when: always
-      # - run:
-      #     name: Setup Code Climate test-reporter
-      #     command: |
-      #         # download test reporter as a static binary
-      #         curl -L https://codeclimate.com/downloads/test-reporter/test-reporter-latest-linux-amd64 > ./cc-test-reporter
-      #         chmod +x ./cc-test-reporter
-      #         ./cc-test-reporter before-build
-      #     when: always
-      # - run:
-      #     name: code-coverage
-      #     command: |
-      #         mkdir coverage
-      #         # nyc report requires that nyc has already been run,
-      #         # which creates the .nyc_output folder containing necessary data
-      #         ./node_modules/.bin/nyc report --reporter=text-lcov > coverage/lcov.info
-      #         ./cc-test-reporter after-build -t lcov
-      #     when: always
-      # - store_test_results:
-      #     path: ./reports
-      # - store_artifacts:
-      #     path: ./reports/mocha/test-results.xml
-      # - store_artifacts:
-      #     path: ./coverage/lcov.info
-      #     prefix: tests
+            npm test
+            npm install mocha-junit-reporter
+            mkdir reports
+            ./node_modules/.bin/nyc ./node_modules/.bin/mocha --recursive --timeout=10000 --exit --reporter mocha-junit-reporter --reporter-options mochaFile=reports/mocha/test-results.xml --require babel-core/register --require ignore-styles --require /home/circleci/node/node_modules/atom-test-harness/lib/setup.js test/*.test.js test/**/*.test.js
+            # download test reporter as a static binary
+            curl -L https://codeclimate.com/downloads/test-reporter/test-reporter-latest-linux-amd64 > ./cc-test-reporter
+            chmod +x ./cc-test-reporter
+            ./cc-test-reporter before-build
+            mkdir coverage
+            # nyc report requires that nyc has already been run,
+            # which creates the .nyc_output folder containing necessary data
+            ./node_modules/.bin/nyc report --reporter=text-lcov > coverage/lcov.info
+            ./cc-test-reporter after-build -t lcov
+          when: always
+      - store_test_results:
+          path: ./reports
+      - store_artifacts:
+          path: ./reports/mocha/test-results.xml
+      - store_artifacts:
+          path: ./coverage/lcov.info
+          prefix: tests
   build:
     <<: *container_config
     steps:
@@ -234,6 +222,10 @@ workflows:
     jobs:
       - dependencies:
           context: atom-artifactory
+      - lint-audit-test:
+          context: atom-artifactory
+          requires:
+            - dependencies
       # - audit:
       #     context: atom-artifactory
       #     requires:
