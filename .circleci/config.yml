@@ -80,6 +80,16 @@ jobs:
           root: .
           paths:
             - aws_config
+  test:
+    <<: *container_config
+    executor: aws-cli/default
+    steps:
+      - aws-cli/install
+      - set_vars
+      - run:
+          name: Configure AWS CLI
+          command: |
+            aws s3 ls
   sync:
     <<: *container_config
     executor: aws-cli/default
@@ -113,8 +123,12 @@ workflows:
   version: 2
   default-workflow:
     jobs:
-      - aws_config
-      - sync
+      # - aws_config
+      - test
+      # - sync
+      #     requires:
+      #       - sync
+      #       - aws_config
       # - deploy:
       #     requires:
       #       - sync
