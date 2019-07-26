@@ -27,15 +27,15 @@ jobs:
       - run:
           name: Setup variables
           command: |
-            echo '[ $CIRCLE_BRANCH != "development" && $CIRCLE_BRANCH != "master" && $CIRCLE_BRANCH != "test" && $CIRCLE_BRANCH != "uat" ] && KEYENV=DEVELOPMENT && BRANCH=development' >> aws_config
-            echo '[ $CIRCLE_BRANCH == "development" ] || [ $CIRCLE_BRANCH == "master" ] || [ $CIRCLE_BRANCH == "test" ] || [ $CIRCLE_BRANCH == "uat" ] && KEYENV=$( echo $CIRCLE_BRANCH | tr "[:lower:]" "[:upper:]" ) && BRANCH=$CIRCLE_BRANCH' >> aws_config
+            echo '[[] $CIRCLE_BRANCH != "development" && $CIRCLE_BRANCH != "master" && $CIRCLE_BRANCH != "test" && $CIRCLE_BRANCH != "uat" ]] && KEYENV=DEVELOPMENT && BRANCH=development' >> aws_config
+            echo '[[ $CIRCLE_BRANCH == "development" ]] || [[ $CIRCLE_BRANCH == "master" ]] || [[ $CIRCLE_BRANCH == "test" ]] || [[ $CIRCLE_BRANCH == "uat" ]] && KEYENV=$( echo $CIRCLE_BRANCH | tr "[:lower:]" "[:upper:]" ) && BRANCH=$CIRCLE_BRANCH' >> aws_config
             echo 'ACCESS_KEY="AWS_ACCESS_KEY_ID_$KEYENV"' >> aws_config
             echo 'SECRET_KEY="AWS_SECRET_ACCESS_KEY_$KEYENV"' >> aws_config
             echo 'aws configure set aws_access_key_id "${!ACCESS_KEY}" --profile default' >> aws_config
             echo 'aws configure set aws_secret_access_key "${!SECRET_KEY}" --profile default' >> aws_config
             echo 'aws configure set region us-east-1 --profile default' >> aws_config
-            echo '[ $CIRCLE_BRANCH != "master" ] && export CIRCLE_LD_KEY=$TEST_LD_SDK_KEY' >> aws_config 
-            echo '[ $CIRCLE_BRANCH == "master" ] && export CIRCLE_LD_KEY=$PROD_LD_SDK_KEY' >> aws_config       
+            echo '[[ $CIRCLE_BRANCH != "master" ]] && export CIRCLE_LD_KEY=$TEST_LD_SDK_KEY' >> aws_config 
+            echo '[[ $CIRCLE_BRANCH == "master" ]] && export CIRCLE_LD_KEY=$PROD_LD_SDK_KEY' >> aws_config       
       - persist_to_workspace:
           root: .
           paths:
