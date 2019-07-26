@@ -1,26 +1,9 @@
 version: 2.1
 
-# define which branches trigger builds
-# general:
-#   branches:
-#     only:
-#      - development
-#      - test
-#      - uat
-#      - production
-
 references:
-  restore_dep_cache: &restore_dep_cache
-    restore_cache:
-      keys:
-        - v1-{{ .Environment.CIRCLE_PROJECT_REPONAME }}-dependencies-{{ .Branch }}-{{ checksum "package.json" }}
   container_config: &container_config
     docker:
       - image: circleci/node:10
-  restore_gz: &restore_gz
-    restore_cache:
-      keys:
-        - build-artifact
   base_filter: &base_filter
     filters:
       tags:
@@ -32,129 +15,30 @@ references:
       tags:
         only: /^.*/
 
-
 orbs:
   aws-cli: circleci/aws-cli@0.1.13
 
-commands:
-  configure_aws:
-    description: "Configure AWS"
-    parameters:
-      env:
-        type: string
-        default: $CIRCLE_BRANCH
-    steps:
-      - run:
-          name: Configure AWS CLI
-          command: |
-            if [[ $CIRCLE_BRANCH != "development" && $CIRCLE_BRANCH != "production" && $CIRCLE_BRANCH != "test" && $CIRCLE_BRANCH != "qa" ]]; then
-              KEYENV=DEVELOPMENT
-              BRANCH=development
-            else
-              KEYENV=$( echo $CIRCLE_BRANCH | tr '[:lower:]' '[:upper:]' )
-              BRANCH=$CIRCLE_BRANCH
-            fi
-            ACCESS_KEY="AWS_ACCESS_KEY_ID_$KEYENV"
-            SECRET_KEY="AWS_SECRET_ACCESS_KEY_$KEYENV"
-            echo "${!ACCESS_KEY}"
-            aws configure set aws_access_key_id "${!ACCESS_KEY}" --profile default
-            aws configure set aws_secret_access_key "${!SECRET_KEY}" --profile default
-            aws configure set region us-east-1 --profile default
-            if [[ $CIRCLE_BRANCH != "production" ]]; then export CIRCLE_LD_KEY=$TEST_LD_SDK_KEY; else export CIRCLE_LD_KEY=$PROD_LD_SDK_KEY; fi
-
-
 jobs:
-  set_vars:
+  aws_config:
     <<: *container_config
+        executor: aws-cli/default
     steps:
+      - aws-cli/install
       - run:
           name: Setup variables
           command: |
-            echo <<'EOF' >>$BASH_ENV
-            if [[ $CIRCLE_BRANCH != "development" && $CIRCLE_BRANCH != "production" && $CIRCLE_BRANCH != "test" && $CIRCLE_BRANCH != "qa" ]]; then
-              KEYENV=DEVELOPMENT
-              BRANCH=development
-            else
-              KEYENV=$( echo $CIRCLE_BRANCH | tr '[:lower:]' '[:upper:]' )
-              BRANCH=$CIRCLE_BRANCH
-            fi
-            ACCESS_KEY="AWS_ACCESS_KEY_ID_$KEYENV"
-            SECRET_KEY="AWS_SECRET_ACCESS_KEY_$KEYENV"
-            echo "${!ACCESS_KEY}"
-            aws configure set aws_access_key_id "${!ACCESS_KEY}" --profile default
-            aws configure set aws_secret_access_key "${!SECRET_KEY}" --profile default
-            aws configure set region us-east-1 --profile default
-            EOF
-            echo $BASH_ENV > ./test
-            cat ./test
-  dependencies:
-    <<: *container_config
-    steps:
-      - run:
-          name: Setup variables
-          command: |
-            echo \<<'EOF' >>$BASH_ENV
-            if [[ $CIRCLE_BRANCH != "development" && $CIRCLE_BRANCH != "production" && $CIRCLE_BRANCH != "test" && $CIRCLE_BRANCH != "qa" ]]; then
-              KEYENV=DEVELOPMENT
-              BRANCH=development
-            else
-              KEYENV=$( echo $CIRCLE_BRANCH | tr '[:lower:]' '[:upper:]' )
-              BRANCH=$CIRCLE_BRANCH
-            fi
-            ACCESS_KEY="AWS_ACCESS_KEY_ID_$KEYENV"
-            SECRET_KEY="AWS_SECRET_ACCESS_KEY_$KEYENV"
-            echo "${!ACCESS_KEY}"
-            aws configure set aws_access_key_id "${!ACCESS_KEY}" --profile default
-            aws configure set aws_secret_access_key "${!SECRET_KEY}" --profile default
-            aws configure set region us-east-1 --profile default
-            EOF
-  lint-audit-test:
-    <<: *container_config
-    steps:
-      - checkout
-      - *restore_dep_cache
-      - run:
-          name: Lint, audit, and test code
-          command: |
-            npm run lint
-            npm i --package-lock-only
-            npm audit
-            npm test
-            npm install mocha-junit-reporter
-            mkdir reports
-            ./node_modules/.bin/nyc ./node_modules/.bin/mocha --recursive --timeout=10000 --exit --reporter mocha-junit-reporter --reporter-options mochaFile=reports/mocha/test-results.xml --require babel-core/register --require ignore-styles --require /home/circleci/node/node_modules/atom-test-harness/lib/setup.js test/*.test.js test/**/*.test.js
-            # download test reporter as a static binary
-            curl -L https://codeclimate.com/downloads/test-reporter/test-reporter-latest-linux-amd64 > ./cc-test-reporter
-            chmod +x ./cc-test-reporter
-            ./cc-test-reporter before-build
-            mkdir coverage
-            # nyc report requires that nyc has already been run,
-            # which creates the .nyc_output folder containing necessary data
-            ./node_modules/.bin/nyc report --reporter=text-lcov > coverage/lcov.info
-            ./cc-test-reporter after-build -t lcov
-          when: always
-      - store_test_results:
-          path: ./reports
-      - store_artifacts:
-          path: ./reports/mocha/test-results.xml
-      - store_artifacts:
-          path: ./coverage/lcov.info
-          prefix: tests
-  build:
-    <<: *container_config
-    steps:
-      - checkout
-      - *restore_dep_cache
-      - run:
-          name: NPM build
-          command: npm build .
-      - run:
-          name: Compress
-          command: zip -r $CIRCLE_PROJECT_REPONAME-$CIRCLE_TAG.zip ./*
+            echo 'if [ $CIRCLE_BRANCH != "development" && $CIRCLE_BRANCH != "master" && $CIRCLE_BRANCH != "test" && $CIRCLE_BRANCH != "uat" ] then KEYENV=DEVELOPMENT && BRANCH=development' >> aws_config
+            echo 'if [ $CIRCLE_BRANCH == "development" || $CIRCLE_BRANCH == "master" || $CIRCLE_BRANCH == "test" || $CIRCLE_BRANCH == "uat" ] then KEYENV=$( echo $CIRCLE_BRANCH | tr "[:lower:]" "[:upper:]" ) && BRANCH=$CIRCLE_BRANCH fi' >> aws_config
+            echo 'ACCESS_KEY="AWS_ACCESS_KEY_ID_$KEYENV"' >> aws_config
+            echo 'SECRET_KEY="AWS_SECRET_ACCESS_KEY_$KEYENV"' >> aws_config
+            echo 'aws configure set aws_access_key_id "${!ACCESS_KEY}" --profile default' >> aws_config
+            echo 'aws configure set aws_secret_access_key "${!SECRET_KEY}" --profile default' >> aws_config
+            echo 'aws configure set region us-east-1 --profile default' >> aws_config
+            echo 'if [[ $CIRCLE_BRANCH != "master" ]]; then export CIRCLE_LD_KEY=$TEST_LD_SDK_KEY; else export CIRCLE_LD_KEY=$PROD_LD_SDK_KEY; fi' >> aws_config       
       - persist_to_workspace:
           root: .
           paths:
-            - ./*
+            - aws_config
   sync:
     <<: *container_config
     executor: aws-cli/default
@@ -162,28 +46,11 @@ jobs:
       - aws-cli/install
       - attach_workspace:
           at: .
-      - configure_aws
+      - run: cat aws_config >> $BASH_ENV
       - run:
           name: Configure AWS CLI
           command: |
-            # for any braches outside of lifecycle, make branch=development for AWS keys and S3 bucket
-            if [[ $CIRCLE_BRANCH != "development" && $CIRCLE_BRANCH != "production" && $CIRCLE_BRANCH != "test" && $CIRCLE_BRANCH != "qa" ]]; then
-              KEYENV=DEVELOPMENT
-              BRANCH=development
-            else
-              KEYENV=$( echo $CIRCLE_BRANCH | tr '[:lower:]' '[:upper:]' )
-              BRANCH=$CIRCLE_BRANCH
-            fi
-
-            ACCESS_KEY="AWS_ACCESS_KEY_ID_$KEYENV"
-            SECRET_KEY="AWS_SECRET_ACCESS_KEY_$KEYENV"
-            echo "${!ACCESS_KEY}"
-            aws configure set aws_access_key_id "${!ACCESS_KEY}" --profile default
-            aws configure set aws_secret_access_key "${!SECRET_KEY}" --profile default
-            aws configure set region us-east-1 --profile default
-            aws s3api put-object --key $CIRCLE_PROJECT_REPONAME-$CIRCLE_TAG.zip --body ./$CIRCLE_PROJECT_REPONAME-$CIRCLE_TAG.zip --bucket atom-shield-build-artifacts-$BRANCH-us-east-1
-
-
+            aws s3 ls
   deploy:
     <<: *container_config
     executor: aws-cli/default
@@ -191,67 +58,26 @@ jobs:
       - aws-cli/install
       - attach_workspace:
           at: .
+      - run: cat aws_config >> $BASH_ENV
       - run:
           name: deploy Lambda
           command: |
-            # for any braches outside of lifecycle, make branch=development for AWS keys and S3 bucket
-            if [[ $CIRCLE_BRANCH != "development" && $CIRCLE_BRANCH != "production" && $CIRCLE_BRANCH != "test" && $CIRCLE_BRANCH != "qa" ]]; then
-              KEYENV=DEVELOPMENT
-              BRANCH=development
-            else
-              KEYENV=$( echo $CIRCLE_BRANCH | tr '[:lower:]' '[:upper:]' )
-              BRANCH=$CIRCLE_BRANCH
-            fi
-
-            ACCESS_KEY="AWS_ACCESS_KEY_ID_$KEYENV"
-            SECRET_KEY="AWS_SECRET_ACCESS_KEY_$KEYENV"
-            echo "${!ACCESS_KEY}"
-            eval "export AWS_ACCESS_KEY_ID=${!ACCESS_KEY}"
-            eval "export AWS_SECRET_ACCESS_KEY=${!SECRET_KEY}"
-            echo $AWS_ACCESS_KEY_ID
-            aws configure set aws_access_key_id "${!ACCESS_KEY}" --profile default
-            aws configure set aws_secret_access_key "${!SECRET_KEY}" --profile default
-            aws configure set region us-east-1 --profile default          
+            aws lambda update-function-configuration --function-name $CIRCLE_PROJECT_REPONAME-$BRANCH --environment Variables="{LAUNCHDARKLY_KEY=$CIRCLE_LD_KEY,ENVIRONMENT=$BRANCH,NODE_ENV=$BRANCH}"       
             aws lambda update-function-code --function-name $CIRCLE_PROJECT_REPONAME-$BRANCH --s3-bucket atom-shield-build-artifacts-$BRANCH-us-east-1 --s3-key $CIRCLE_PROJECT_REPONAME-$CIRCLE_TAG.zip
             aws lambda publish-version --function-name $CIRCLE_PROJECT_REPONAME-$BRANCH
-#           aws lambda update-alias --function-name $CIRCLE_PROJECT_REPONAME-$BRANCH --name "live" --function-version '$LATEST'
+            aws lambda update-alias --function-name $CIRCLE_PROJECT_REPONAME-$BRANCH --name "live" --function-version '$LATEST'
  
 workflows:
   version: 2
   default-workflow:
     jobs:
-      - dependencies:
-          context: atom-artifactory
-      - lint-audit-test:
-          context: atom-artifactory
+      - aws_config
+      - sync:
           requires:
-            - dependencies
-      # - audit:
-      #     context: atom-artifactory
-      #     requires:
-      #       - dependencies
-      # - lint:
-      #     requires:
-      #       - dependencies
-      # - test:
-      #     requires:
-      #       - dependencies
-      # - test:
-      #     requires:
-      #       - dependencies
-      #     <<: *base_filter
-      # - set-vars:
-      #   <<: *base_filter
-      # - build:
-      #     requires:
-      #       # - test
-      #       - dependencies
-      #     <<: *base_filter
-      # - sync:
-      #     requires:
-      #       - build
-      #     <<: *base_filter
+            - aws_config
+          <<: *base_filter
       # - deploy:
       #     requires:
       #       - sync
+      #       - aws_config
       #     <<: *base_filter
