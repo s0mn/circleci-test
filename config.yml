@@ -1,0 +1,148 @@
+version: 2.1
+
+references:
+  restore_dep_cache: &restore_dep_cache
+    restore_cache:
+      keys:
+        - v1-{{ .Environment.CIRCLE_PROJECT_REPONAME }}-dependencies-{{ .Branch }}-{{ checksum "package.json" }}
+  container_config: &container_config
+    docker:
+      - image: circleci/node:10
+  restore_gz: &restore_gz
+    restore_cache:
+      keys:
+        - build-artifact
+  base_filter: &base_filter
+    filters:
+      tags:
+        only: /^.*/
+  tag_filter: &tag_filter
+    filters:
+      branches:
+        ignore: /.*/
+      tags:
+        only: /^.*/
+
+orbs:
+  aws-cli: circleci/aws-cli@0.1.13
+
+commands:
+  configure_aws:
+    description: "Configure AWS"
+    steps:
+      - run:
+          name: Configure AWS CLI
+          command: |
+            ACCESS_KEY="AWS_ACCESS_KEY_ID_$KEYENV"
+            SECRET_KEY="AWS_SECRET_ACCESS_KEY_$KEYENV"
+            echo "${!ACCESS_KEY}"
+            aws configure set aws_access_key_id "${!ACCESS_KEY}" --profile default
+            aws configure set aws_secret_access_key "${!SECRET_KEY}" --profile default
+            aws configure set region us-east-1 --profile default
+
+jobs:
+  aws_config:
+    <<: *container_config
+    steps:
+      - run:
+          name: Setup variables
+          command: |
+            echo 'if [[ $CIRCLE_BRANCH != "development" && $CIRCLE_BRANCH != "production" && $CIRCLE_BRANCH != "test" && $CIRCLE_BRANCH != "qa" ]]; then KEYENV=DEVELOPMENT && BRANCH=development; else KEYENV=$( echo $CIRCLE_BRANCH | tr "[:lower:]" "[:upper:]" ) && BRANCH=$CIRCLE_BRANCH; fi' >> aws_config
+            echo 'ACCESS_KEY="AWS_ACCESS_KEY_ID_$KEYENV"' >> aws_config
+            echo 'SECRET_KEY="AWS_SECRET_ACCESS_KEY_$KEYENV"' >> aws_config
+            echo 'aws configure set aws_access_key_id "${!ACCESS_KEY}" --profile default' >> aws_config
+            echo 'aws configure set aws_secret_access_key "${!SECRET_KEY}" --profile default' >> aws_config
+            echo 'aws configure set region us-east-1 --profile default' >> aws_config
+            echo 'if [[ $CIRCLE_BRANCH != "production" ]]; then export CIRCLE_LD_KEY=$TEST_LD_SDK_KEY; else export CIRCLE_LD_KEY=$PROD_LD_SDK_KEY; fi' >> aws_config       
+      - persist_to_workspace:
+          root: .
+          paths:
+            - aws_config
+  dependencies:
+    <<: *container_config
+    steps:
+      - checkout
+      - *restore_dep_cache
+      - run:
+          name: Install dependencies
+          command: |
+            curl -u $npmuser:$npmpassword $npmauthurl >> .npmrc
+            echo "registry = $npmregistry" >> .npmrc
+            npm install
+      - save_cache:
+          key: v1-{{ .Environment.CIRCLE_PROJECT_REPONAME }}-dependencies-{{ .Branch }}-{{ checksum "package.json" }}
+          paths:
+            - ./node_modules
+            - ~/.npm
+  build:
+    <<: *container_config
+    steps:
+      - checkout
+      - run:
+          name: Install dependencies
+          command: |
+            curl -u $npmuser:$npmpassword $npmauthurl >> /home/circleci/.npmrc
+            echo "registry = $npmregistry" >> /home/circleci/.npmrc
+            cd ~/project
+            npm install
+            sudo chown -R circleci:circleci /usr/local
+            npm install -g atom-lambda-deployer
+            npm install -g parcel-bundler
+            lambo build -m && AWS_XRAY_TRACING_NAME=atom-launcher
+      - run:
+          name: Compress
+          command: zip -j $CIRCLE_PROJECT_REPONAME-$CIRCLE_TAG.zip ./dist/*
+      - persist_to_workspace:
+          root: .
+          paths:
+            - ./*
+  sync:
+    <<: *container_config
+    executor: aws-cli/default
+    steps:
+      - aws-cli/install
+      - attach_workspace:
+          at: .
+      - run: cat aws_config >> $BASH_ENV
+      - run:
+          name: Configure AWS CLI
+          command: |
+            aws s3api put-object --key $CIRCLE_PROJECT_REPONAME-$CIRCLE_TAG.zip --body ./$CIRCLE_PROJECT_REPONAME-$CIRCLE_TAG.zip --bucket atom-shield-build-artifacts-$BRANCH-us-east-1
+  deploy:
+    <<: *container_config
+    executor: aws-cli/default
+    steps:
+      - aws-cli/install
+      - attach_workspace:
+          at: .
+      - run: cat aws_config >> $BASH_ENV
+      - run:
+          name: deploy Lambda
+          command: |
+            aws lambda update-function-configuration --function-name $CIRCLE_PROJECT_REPONAME-$BRANCH --environment Variables="{LAUNCHDARKLY_KEY=$CIRCLE_LD_KEY,ENVIRONMENT=$BRANCH,NODE_ENV=$BRANCH}"       
+            aws lambda update-function-code --function-name $CIRCLE_PROJECT_REPONAME-$BRANCH --s3-bucket atom-shield-build-artifacts-$BRANCH-us-east-1 --s3-key $CIRCLE_PROJECT_REPONAME-$CIRCLE_TAG.zip
+            aws lambda publish-version --function-name $CIRCLE_PROJECT_REPONAME-$BRANCH
+            aws lambda update-alias --function-name $CIRCLE_PROJECT_REPONAME-$BRANCH --name "live" --function-version '$LATEST'
+ 
+workflows:
+  version: 2
+  default-workflow:
+    jobs:
+      - aws_config
+      - dependencies:
+          context: atom-artifactory
+      - build:
+          requires:
+            - dependencies
+          context: atom-artifactory
+          <<: *base_filter
+      - sync:
+          requires:
+            - build
+            - aws_config
+          <<: *base_filter
+      - deploy:
+          requires:
+            - sync
+            - aws_config
+          <<: *base_filter
